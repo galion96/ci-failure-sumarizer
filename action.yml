@@ -1,0 +1,45 @@
+name: 'CI Failure Summarizer'
+description: 'Analyzes CI/CD failures using AI and sends human-readable summaries to Slack'
+author: ''
+
+branding:
+  icon: 'alert-circle'
+  color: 'red'
+
+inputs:
+  github_token:
+    description: 'GitHub token to fetch workflow logs'
+    required: true
+    default: ${{ github.token }}
+  anthropic_api_key:
+    description: 'Anthropic API key for Claude'
+    required: true
+  slack_webhook_url:
+    description: 'Slack incoming webhook URL'
+    required: true
+  run_id:
+    description: 'Workflow run ID to analyze (defaults to current run)'
+    required: false
+    default: ${{ github.run_id }}
+  max_log_lines:
+    description: 'Maximum number of log lines to analyze (to control costs)'
+    required: false
+    default: '500'
+  claude_model:
+    description: 'Claude model to use'
+    required: false
+    default: 'claude-sonnet-4-20250514'
+  include_log_snippet:
+    description: 'Include relevant log snippet in Slack message'
+    required: false
+    default: 'true'
+
+outputs:
+  summary:
+    description: 'The AI-generated failure summary'
+  slack_message_ts:
+    description: 'Timestamp of the Slack message sent'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
