@@ -1,6 +1,15 @@
 const core = require('@actions/core');
 const github = require('@actions/github');
 const Anthropic = require('@anthropic-ai/sdk');
+const Groq = require('groq-sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+// Default models for each provider
+const DEFAULT_MODELS = {
+  anthropic: 'claude-sonnet-4-20250514',
+  groq: 'llama-3.3-70b-versatile',
+  gemini: 'gemini-1.5-flash',
+};
 
 // Error keywords to search for in logs
 const ERROR_KEYWORDS = [
@@ -166,18 +175,77 @@ async function sendSlackWebhook(webhookUrl, blocks) {
   return response;
 }
 
+async function analyzeWithAI(provider, apiKey, model, prompt) {
+  switch (provider) {
+    case 'anthropic': {
+      const anthropic = new Anthropic({ apiKey });
+      const response = await anthropic.messages.create({
+        model,
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      return response.content[0].text;
+    }
+
+    case 'groq': {
+      const groq = new Groq({ apiKey });
+      const response = await groq.chat.completions.create({
+        model,
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      return response.choices[0].message.content;
+    }
+
+    case 'gemini': {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const geminiModel = genAI.getGenerativeModel({ model });
+      const response = await geminiModel.generateContent(prompt);
+      return response.response.text();
+    }
+
+    default:
+      throw new Error(`Unknown provider: ${provider}`);
+  }
+}
+
 async function run() {
   try {
     // Get inputs
     const githubToken = core.getInput('github_token', { required: true });
-    const anthropicApiKey = core.getInput('anthropic_api_key', { required: true });
+    const provider = core.getInput('provider') || 'anthropic';
     const slackBotToken = core.getInput('slack_bot_token');
     const slackWebhookUrl = core.getInput('slack_webhook_url');
     const notificationMode = core.getInput('notification_mode') || 'channel';
     const fallbackChannel = core.getInput('fallback_channel');
     const runId = core.getInput('run_id') || github.context.runId;
     const maxLogLines = parseInt(core.getInput('max_log_lines') || '500', 10);
-    const claudeModel = core.getInput('claude_model') || 'claude-sonnet-4-20250514';
+
+    // Get API key based on provider
+    let apiKey;
+    switch (provider) {
+      case 'anthropic':
+        apiKey = core.getInput('anthropic_api_key');
+        break;
+      case 'groq':
+        apiKey = core.getInput('groq_api_key');
+        break;
+      case 'gemini':
+        apiKey = core.getInput('gemini_api_key');
+        break;
+      default:
+        core.setFailed(`Unknown provider: ${provider}. Use 'anthropic', 'groq', or 'gemini'`);
+        return;
+    }
+
+    if (!apiKey) {
+      core.setFailed(`${provider}_api_key is required when using the ${provider} provider`);
+      return;
+    }
+
+    // Get model with provider-specific default
+    const model = core.getInput('model') || DEFAULT_MODELS[provider];
+    core.info(`Using provider: ${provider}, model: ${model}`);
 
     // Validate inputs based on mode
     if (notificationMode === 'dm' && !slackBotToken) {
@@ -262,16 +330,8 @@ async function run() {
       core.info(`No keyword matches found, using last ${Math.min(logLines.length, maxLogLines)} lines`);
     }
 
-    // Analyze with Claude
-    const anthropic = new Anthropic({ apiKey: anthropicApiKey });
-
-    const analysis = await anthropic.messages.create({
-      model: claudeModel,
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: `You are a CI/CD expert. Analyze these GitHub Actions logs from a failed workflow run and provide a concise summary.
+    // Build the analysis prompt
+    const prompt = `You are a CI/CD expert. Analyze these GitHub Actions logs from a failed workflow run and provide a concise summary.
 
 Repository: ${owner}/${repo}
 Workflow: ${workflowRun.name}
@@ -289,12 +349,10 @@ Provide a response in this format:
 3. **Suggested Fix**: Brief actionable suggestion to fix the issue
 4. **Relevant Log Snippet**: The most relevant 3-5 lines from the logs (only if helpful)
 
-Keep it concise - this will be posted to Slack. Focus on being helpful, not comprehensive.`
-        }
-      ]
-    });
+Keep it concise - this will be posted to Slack. Focus on being helpful, not comprehensive.`;
 
-    const summary = analysis.content[0].text;
+    // Analyze with selected AI provider
+    const summary = await analyzeWithAI(provider, apiKey, model, prompt);
     core.info('Analysis complete');
     core.setOutput('summary', summary);
 

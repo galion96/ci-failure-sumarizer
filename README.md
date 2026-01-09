@@ -8,12 +8,22 @@ A GitHub Action that uses AI to analyze CI/CD failures and sends human-readable 
 
 1. Your CI workflow fails
 2. This action fetches the logs from failed jobs
-3. Claude AI analyzes the logs and identifies the root cause
+3. AI analyzes the logs and identifies the root cause
 4. A summary is sent to Slack with:
    - What went wrong
    - The specific error
    - Suggested fix
    - Link to the full logs
+
+## AI Providers
+
+Choose the AI provider that fits your needs:
+
+| Provider | Model | Cost | Notes |
+|----------|-------|------|-------|
+| `anthropic` | Claude Sonnet | ~$0.003-0.01/analysis | Best quality (default) |
+| `groq` | Llama 3.3 70B | **FREE** | Fast inference, generous free tier |
+| `gemini` | Gemini 1.5 Flash | **FREE** | 15 req/min free tier |
 
 ## Notification Modes
 
@@ -51,6 +61,24 @@ A GitHub Action that uses AI to analyze CI/CD failures and sends human-readable 
     slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
 
+#### Using Free Providers (Groq or Gemini)
+
+```yaml
+# Option: Use Groq (FREE)
+- uses: galion96/ci-failure-sumarizer@v1
+  with:
+    provider: groq
+    groq_api_key: ${{ secrets.GROQ_API_KEY }}
+    slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+# Option: Use Gemini (FREE)
+- uses: galion96/ci-failure-sumarizer@v1
+  with:
+    provider: gemini
+    gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+    slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+```
+
 ---
 
 ### Option B: DM the Committer (Bot Token)
@@ -85,17 +113,30 @@ This mode looks up the committer's email in Slack and DMs them directly.
 
 ---
 
-### Get an Anthropic API Key
+### Get an API Key
 
+#### Anthropic (Paid)
 1. Sign up at [console.anthropic.com](https://console.anthropic.com)
 2. Create an API key
-3. Note: This action uses Claude Sonnet by default (~$0.003-0.01 per analysis)
+3. Cost: ~$0.003-0.01 per analysis
+
+#### Groq (FREE)
+1. Sign up at [console.groq.com](https://console.groq.com)
+2. Create an API key
+3. Free tier with generous rate limits
+
+#### Google Gemini (FREE)
+1. Go to [aistudio.google.com](https://aistudio.google.com)
+2. Get an API key
+3. Free tier: 15 requests per minute
 
 ### Add Secrets to Your Repository
 
-Go to your repo's Settings > Secrets and variables > Actions, and add:
+Go to your repo's Settings > Secrets and variables > Actions, and add the relevant secrets:
 
-- `ANTHROPIC_API_KEY`: Your Anthropic API key
+- `ANTHROPIC_API_KEY`: Your Anthropic API key (if using Anthropic)
+- `GROQ_API_KEY`: Your Groq API key (if using Groq)
+- `GEMINI_API_KEY`: Your Gemini API key (if using Gemini)
 - `SLACK_WEBHOOK_URL`: Your Slack webhook URL (for channel mode)
 - `SLACK_BOT_TOKEN`: Your Slack bot token (for DM mode)
 
@@ -160,16 +201,21 @@ jobs:
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
 | `github_token` | GitHub token to fetch logs | Yes | `${{ github.token }}` |
-| `anthropic_api_key` | Anthropic API key | Yes | - |
-| `slack_webhook_url` | Slack webhook URL (channel mode) | No* | - |
-| `slack_bot_token` | Slack bot token (DM mode) | No* | - |
+| `provider` | AI provider: `anthropic`, `groq`, or `gemini` | No | `anthropic` |
+| `anthropic_api_key` | Anthropic API key | If provider=anthropic | - |
+| `groq_api_key` | Groq API key (FREE) | If provider=groq | - |
+| `gemini_api_key` | Google Gemini API key (FREE) | If provider=gemini | - |
+| `model` | Model to use | No | Provider default* |
+| `slack_webhook_url` | Slack webhook URL (channel mode) | No** | - |
+| `slack_bot_token` | Slack bot token (DM mode) | No** | - |
 | `notification_mode` | `channel` or `dm` | No | `channel` |
 | `fallback_channel` | Channel ID if DM lookup fails | No | - |
 | `run_id` | Workflow run ID to analyze | No | Current run |
 | `max_log_lines` | Max log lines to analyze | No | `500` |
-| `claude_model` | Claude model to use | No | `claude-sonnet-4-20250514` |
 
-*Either `slack_webhook_url` or `slack_bot_token` is required depending on mode.
+*Default models: anthropic=`claude-sonnet-4-20250514`, groq=`llama-3.3-70b-versatile`, gemini=`gemini-1.5-flash`
+
+**Either `slack_webhook_url` or `slack_bot_token` is required depending on mode.
 
 ## Outputs
 
@@ -181,13 +227,15 @@ jobs:
 
 ## Cost Estimation
 
-Using Claude Sonnet with default settings:
-- ~$0.003-0.01 per failure analysis
-- 100 failures/month ≈ $0.30-1.00
+| Provider | Cost per Analysis | 100 failures/month |
+|----------|-------------------|-------------------|
+| Groq | **FREE** | $0 |
+| Gemini | **FREE** | $0 |
+| Anthropic | ~$0.003-0.01 | ~$0.30-1.00 |
 
-You can reduce costs by:
+For Anthropic, you can reduce costs by:
 - Lowering `max_log_lines`
-- Using `claude-haiku-3-20240307` (cheaper, still good)
+- Using a smaller model like `claude-haiku-3-20240307`
 
 ## Development
 
