@@ -214,14 +214,5 @@ npm run build
 
 Contributions are welcome! Please open an issue or PR.
 
-## Support
-
-If this action saved you time, consider:
-
-<a href="https://www.buymeacoffee.com/galion96" target="_blank">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40">
-</a>
-
-## License
 
 MIT
