@@ -2,6 +2,81 @@ const core = require('@actions/core');
 const github = require('@actions/github');
 const Anthropic = require('@anthropic-ai/sdk');
 
+// Error keywords to search for in logs
+const ERROR_KEYWORDS = [
+  /\berror\b/i,
+  /\bfailed\b/i,
+  /\bfailure\b/i,
+  /\bexception\b/i,
+  /\bfatal\b/i,
+  /\bcannot\b/i,
+  /\bcould not\b/i,
+  /\bunable to\b/i,
+  /\bundefined\b/i,
+  /\bnull\b/i,
+  /\btimeout\b/i,
+  /\bexit code [1-9]/i,
+  /\bexited with\b/i,
+  /\bnpm ERR!/,
+  /\bTypeError\b/,
+  /\bSyntaxError\b/,
+  /\bReferenceError\b/,
+  /\bAssertionError\b/,
+  /\bENOENT\b/,
+  /\bEACCES\b/,
+  /\bsegmentation fault\b/i,
+  /\bpanic\b/i,
+  /\bstack trace\b/i,
+  /\btraceback\b/i,
+];
+
+const CONTEXT_LINES = 5; // Lines before and after each match
+
+function extractRelevantLogs(logs, maxLines) {
+  const lines = logs.split('\n');
+  const matchedLineIndices = new Set();
+
+  // Find all lines that match error keywords
+  lines.forEach((line, index) => {
+    for (const pattern of ERROR_KEYWORDS) {
+      if (pattern.test(line)) {
+        // Add context lines around the match
+        for (let i = Math.max(0, index - CONTEXT_LINES); i <= Math.min(lines.length - 1, index + CONTEXT_LINES); i++) {
+          matchedLineIndices.add(i);
+        }
+        break;
+      }
+    }
+  });
+
+  // If no matches found, return null to signal fallback
+  if (matchedLineIndices.size === 0) {
+    return null;
+  }
+
+  // Sort indices and extract lines
+  const sortedIndices = Array.from(matchedLineIndices).sort((a, b) => a - b);
+
+  // Group consecutive lines and add separators
+  const extractedLines = [];
+  let lastIndex = -2;
+
+  for (const index of sortedIndices) {
+    if (index > lastIndex + 1 && extractedLines.length > 0) {
+      extractedLines.push('... (skipped lines) ...');
+    }
+    extractedLines.push(lines[index]);
+    lastIndex = index;
+  }
+
+  // Truncate if still too long
+  if (extractedLines.length > maxLines) {
+    return extractedLines.slice(-maxLines).join('\n');
+  }
+
+  return extractedLines.join('\n');
+}
+
 async function lookupSlackUserByEmail(botToken, email) {
   const response = await fetch(`https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`, {
     headers: {
@@ -171,13 +246,21 @@ async function run() {
       return;
     }
 
-    // Truncate logs if too long
-    const logLines = allLogs.split('\n');
-    const truncatedLogs = logLines.length > maxLogLines
-      ? logLines.slice(-maxLogLines).join('\n')
-      : allLogs;
+    // Try to extract relevant logs using keyword matching
+    let logsToAnalyze = extractRelevantLogs(allLogs, maxLogLines);
+    let usedKeywordExtraction = true;
 
-    core.info(`Analyzing ${Math.min(logLines.length, maxLogLines)} lines of logs`);
+    if (logsToAnalyze) {
+      core.info(`Extracted relevant log sections using keyword matching (${logsToAnalyze.split('\n').length} lines)`);
+    } else {
+      // Fallback to truncating from the end
+      usedKeywordExtraction = false;
+      const logLines = allLogs.split('\n');
+      logsToAnalyze = logLines.length > maxLogLines
+        ? logLines.slice(-maxLogLines).join('\n')
+        : allLogs;
+      core.info(`No keyword matches found, using last ${Math.min(logLines.length, maxLogLines)} lines`);
+    }
 
     // Analyze with Claude
     const anthropic = new Anthropic({ apiKey: anthropicApiKey });
@@ -198,7 +281,7 @@ Author: ${committerName}
 Failed Jobs: ${failedJobs.map(j => j.name).join(', ')}
 
 LOGS:
-${truncatedLogs}
+${logsToAnalyze}
 
 Provide a response in this format:
 1. **Root Cause**: One sentence explaining what caused the failure
