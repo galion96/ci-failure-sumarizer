@@ -22,24 +22,13 @@ A GitHub Action that uses AI to analyze CI/CD failures and sends human-readable 
 | `channel` | Posts to a Slack channel via webhook (default) |
 | `dm` | DMs the person who made the commit that broke the build |
 
-## Example Slack Message
+## Examples
 
-```
-CI Failed: Build and Test
+### Channel Notification
+![Channel Failure](screenshots/channel-failure.png)
 
-Repository: your-org/your-repo
-Branch: feature/new-feature
-Commit: abc1234
-Failed Jobs: test
-
----
-
-1. **Root Cause**: TypeScript compilation failed due to a type mismatch
-2. **Error**: Type 'string' is not assignable to type 'number' in src/utils.ts:42
-3. **Suggested Fix**: Update the function parameter type or convert the input value
-
-[View Workflow Run]
-```
+### DM Notification
+![DM Failure](screenshots/dm-failure.png)
 
 ## Setup
 
@@ -214,5 +203,6 @@ npm run build
 
 Contributions are welcome! Please open an issue or PR.
 
+## License
 
 MIT
