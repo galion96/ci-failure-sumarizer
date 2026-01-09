@@ -14,9 +14,19 @@ inputs:
   anthropic_api_key:
     description: 'Anthropic API key for Claude'
     required: true
+  slack_bot_token:
+    description: 'Slack Bot Token (required for DM mode, starts with xoxb-)'
+    required: false
   slack_webhook_url:
-    description: 'Slack incoming webhook URL'
-    required: true
+    description: 'Slack incoming webhook URL (for channel mode)'
+    required: false
+  notification_mode:
+    description: 'How to notify: "channel" (webhook) or "dm" (DM the committer)'
+    required: false
+    default: 'channel'
+  fallback_channel:
+    description: 'Channel ID to post to if DM lookup fails (e.g., C1234567890)'
+    required: false
   run_id:
     description: 'Workflow run ID to analyze (defaults to current run)'
     required: false
@@ -39,6 +49,8 @@ outputs:
     description: 'The AI-generated failure summary'
   slack_message_ts:
     description: 'Timestamp of the Slack message sent'
+  notified_user:
+    description: 'Slack user ID that was notified (in DM mode)'
 
 runs:
   using: 'node20'

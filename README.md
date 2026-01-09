@@ -2,18 +2,25 @@
 
 A GitHub Action that uses AI to analyze CI/CD failures and sends human-readable summaries to Slack.
 
-**Stop scrolling through thousands of log lines.** Get instant, actionable failure summaries delivered to your Slack channel.
+**Stop scrolling through thousands of log lines.** Get instant, actionable failure summaries delivered to Slack — either to a channel or directly to the person who broke the build.
 
 ## How it works
 
 1. Your CI workflow fails
 2. This action fetches the logs from failed jobs
 3. Claude AI analyzes the logs and identifies the root cause
-4. A summary is posted to your Slack channel with:
+4. A summary is sent to Slack with:
    - What went wrong
    - The specific error
    - Suggested fix
    - Link to the full logs
+
+## Notification Modes
+
+| Mode | Description |
+|------|-------------|
+| `channel` | Posts to a Slack channel via webhook (default) |
+| `dm` | DMs the person who made the commit that broke the build |
 
 ## Example Slack Message
 
@@ -36,7 +43,9 @@ Failed Jobs: test
 
 ## Setup
 
-### 1. Create a Slack Incoming Webhook
+### Option A: Channel Notifications (Webhook)
+
+#### 1. Create a Slack Incoming Webhook
 
 1. Go to [Slack API Apps](https://api.slack.com/apps)
 2. Create a new app (or use existing)
@@ -44,31 +53,74 @@ Failed Jobs: test
 4. Create a webhook for your desired channel
 5. Copy the webhook URL
 
-### 2. Get an Anthropic API Key
+#### 2. Add to Your Workflow
+
+```yaml
+- uses: galion96/ci-failure-sumarizer@v1
+  with:
+    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+    slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+```
+
+---
+
+### Option B: DM the Committer (Bot Token)
+
+This mode looks up the committer's email in Slack and DMs them directly.
+
+#### 1. Create a Slack App with Bot Token
+
+1. Go to [Slack API Apps](https://api.slack.com/apps)
+2. Create a new app → "From scratch"
+3. Go to **OAuth & Permissions**
+4. Add these **Bot Token Scopes**:
+   - `users:read.email` — Look up users by email
+   - `users:read` — Read user info
+   - `chat:write` — Send messages
+   - `im:write` — Open DM channels
+5. Click **Install to Workspace**
+6. Copy the **Bot User OAuth Token** (starts with `xoxb-`)
+
+#### 2. Add to Your Workflow
+
+```yaml
+- uses: galion96/ci-failure-sumarizer@v1
+  with:
+    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+    slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+    notification_mode: dm
+    fallback_channel: C1234567890  # Optional: channel ID if user lookup fails
+```
+
+**Important:** The committer's GitHub email must match their Slack email for DM lookup to work.
+
+---
+
+### Get an Anthropic API Key
 
 1. Sign up at [console.anthropic.com](https://console.anthropic.com)
 2. Create an API key
 3. Note: This action uses Claude Sonnet by default (~$0.003-0.01 per analysis)
 
-### 3. Add Secrets to Your Repository
+### Add Secrets to Your Repository
 
 Go to your repo's Settings > Secrets and variables > Actions, and add:
 
 - `ANTHROPIC_API_KEY`: Your Anthropic API key
-- `SLACK_WEBHOOK_URL`: Your Slack webhook URL
+- `SLACK_WEBHOOK_URL`: Your Slack webhook URL (for channel mode)
+- `SLACK_BOT_TOKEN`: Your Slack bot token (for DM mode)
 
-### 4. Add to Your Workflow
+## Full Workflow Examples
 
-Create `.github/workflows/notify-failure.yml`:
+### Channel Mode (Webhook)
 
 ```yaml
 name: Notify on Failure
 
 on:
   workflow_run:
-    workflows: ["*"]  # Or specify: ["Build", "Test", "Deploy"]
-    types:
-      - completed
+    workflows: ["*"]
+    types: [completed]
 
 jobs:
   notify:
@@ -84,9 +136,7 @@ jobs:
           run_id: ${{ github.event.workflow_run.id }}
 ```
 
-### Alternative: Add to Existing Workflow
-
-You can also add it directly to your existing workflow to run on failure:
+### DM Mode (Bot Token)
 
 ```yaml
 name: Build and Test
@@ -106,12 +156,14 @@ jobs:
     needs: [build]
     if: failure()
     steps:
-      - name: Analyze and notify
+      - name: DM the committer
         uses: galion96/ci-failure-sumarizer@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+          notification_mode: dm
+          fallback_channel: C1234567890  # Posts here if user lookup fails
 ```
 
 ## Configuration Options
@@ -120,11 +172,23 @@ jobs:
 |-------|-------------|----------|---------|
 | `github_token` | GitHub token to fetch logs | Yes | `${{ github.token }}` |
 | `anthropic_api_key` | Anthropic API key | Yes | - |
-| `slack_webhook_url` | Slack webhook URL | Yes | - |
+| `slack_webhook_url` | Slack webhook URL (channel mode) | No* | - |
+| `slack_bot_token` | Slack bot token (DM mode) | No* | - |
+| `notification_mode` | `channel` or `dm` | No | `channel` |
+| `fallback_channel` | Channel ID if DM lookup fails | No | - |
 | `run_id` | Workflow run ID to analyze | No | Current run |
-| `max_log_lines` | Max log lines to analyze (controls cost) | No | `500` |
+| `max_log_lines` | Max log lines to analyze | No | `500` |
 | `claude_model` | Claude model to use | No | `claude-sonnet-4-20250514` |
-| `include_log_snippet` | Include log snippet in message | No | `true` |
+
+*Either `slack_webhook_url` or `slack_bot_token` is required depending on mode.
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `summary` | The AI-generated failure summary |
+| `slack_message_ts` | Timestamp of the Slack message |
+| `notified_user` | Slack user ID that was DMed (DM mode only) |
 
 ## Cost Estimation
 
@@ -135,13 +199,6 @@ Using Claude Sonnet with default settings:
 You can reduce costs by:
 - Lowering `max_log_lines`
 - Using `claude-haiku-3-20240307` (cheaper, still good)
-
-## Outputs
-
-| Output | Description |
-|--------|-------------|
-| `summary` | The AI-generated failure summary |
-| `slack_message_ts` | Timestamp of the Slack message |
 
 ## Development
 

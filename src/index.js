@@ -2,16 +2,117 @@ const core = require('@actions/core');
 const github = require('@actions/github');
 const Anthropic = require('@anthropic-ai/sdk');
 
+async function lookupSlackUserByEmail(botToken, email) {
+  const response = await fetch(`https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`, {
+    headers: {
+      'Authorization': `Bearer ${botToken}`,
+    },
+  });
+  const data = await response.json();
+  if (data.ok) {
+    return data.user;
+  }
+  return null;
+}
+
+async function sendSlackDM(botToken, userId, blocks) {
+  // Open a DM channel with the user
+  const openResponse = await fetch('https://slack.com/api/conversations.open', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${botToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ users: userId }),
+  });
+  const openData = await openResponse.json();
+
+  if (!openData.ok) {
+    throw new Error(`Failed to open DM: ${openData.error}`);
+  }
+
+  const channelId = openData.channel.id;
+
+  // Send the message
+  const msgResponse = await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${botToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      channel: channelId,
+      blocks: blocks,
+    }),
+  });
+  const msgData = await msgResponse.json();
+
+  if (!msgData.ok) {
+    throw new Error(`Failed to send DM: ${msgData.error}`);
+  }
+
+  return msgData;
+}
+
+async function sendSlackChannel(botToken, channelId, blocks) {
+  const response = await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${botToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      channel: channelId,
+      blocks: blocks,
+    }),
+  });
+  const data = await response.json();
+
+  if (!data.ok) {
+    throw new Error(`Failed to send to channel: ${data.error}`);
+  }
+
+  return data;
+}
+
+async function sendSlackWebhook(webhookUrl, blocks) {
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ blocks }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Slack webhook failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response;
+}
+
 async function run() {
   try {
     // Get inputs
     const githubToken = core.getInput('github_token', { required: true });
     const anthropicApiKey = core.getInput('anthropic_api_key', { required: true });
-    const slackWebhookUrl = core.getInput('slack_webhook_url', { required: true });
+    const slackBotToken = core.getInput('slack_bot_token');
+    const slackWebhookUrl = core.getInput('slack_webhook_url');
+    const notificationMode = core.getInput('notification_mode') || 'channel';
+    const fallbackChannel = core.getInput('fallback_channel');
     const runId = core.getInput('run_id') || github.context.runId;
     const maxLogLines = parseInt(core.getInput('max_log_lines') || '500', 10);
     const claudeModel = core.getInput('claude_model') || 'claude-sonnet-4-20250514';
-    const includeLogSnippet = core.getInput('include_log_snippet') !== 'false';
+
+    // Validate inputs based on mode
+    if (notificationMode === 'dm' && !slackBotToken) {
+      core.setFailed('slack_bot_token is required for DM mode');
+      return;
+    }
+    if (notificationMode === 'channel' && !slackWebhookUrl && !slackBotToken) {
+      core.setFailed('slack_webhook_url or slack_bot_token is required for channel mode');
+      return;
+    }
 
     const { owner, repo } = github.context.repo;
     const octokit = github.getOctokit(githubToken);
@@ -24,6 +125,11 @@ async function run() {
       repo,
       run_id: parseInt(runId, 10),
     });
+
+    // Get commit author email
+    const committerEmail = workflowRun.head_commit?.author?.email;
+    const committerName = workflowRun.head_commit?.author?.name || 'Unknown';
+    core.info(`Commit author: ${committerName} <${committerEmail}>`);
 
     // Fetch jobs for this run
     const { data: jobsData } = await octokit.rest.actions.listJobsForWorkflowRun({
@@ -88,6 +194,7 @@ Repository: ${owner}/${repo}
 Workflow: ${workflowRun.name}
 Branch: ${workflowRun.head_branch}
 Commit: ${workflowRun.head_sha.substring(0, 7)}
+Author: ${committerName}
 Failed Jobs: ${failedJobs.map(j => j.name).join(', ')}
 
 LOGS:
@@ -108,81 +215,104 @@ Keep it concise - this will be posted to Slack. Focus on being helpful, not comp
     core.info('Analysis complete');
     core.setOutput('summary', summary);
 
-    // Send to Slack
-    const slackPayload = {
-      blocks: [
-        {
-          type: 'header',
-          text: {
-            type: 'plain_text',
-            text: `CI Failed: ${workflowRun.name}`,
-            emoji: true
-          }
-        },
-        {
-          type: 'section',
-          fields: [
-            {
-              type: 'mrkdwn',
-              text: `*Repository:*\n<https://github.com/${owner}/${repo}|${owner}/${repo}>`
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Branch:*\n${workflowRun.head_branch}`
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Commit:*\n<${workflowRun.head_commit?.url || '#'}|${workflowRun.head_sha.substring(0, 7)}>`
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Failed Jobs:*\n${failedJobs.map(j => j.name).join(', ')}`
-            }
-          ]
-        },
-        {
-          type: 'divider'
-        },
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: summary
-          }
-        },
-        {
-          type: 'divider'
-        },
-        {
-          type: 'actions',
-          elements: [
-            {
-              type: 'button',
-              text: {
-                type: 'plain_text',
-                text: 'View Workflow Run',
-                emoji: true
-              },
-              url: workflowRun.html_url
-            }
-          ]
+    // Build Slack message blocks
+    const blocks = [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `CI Failed: ${workflowRun.name}`,
+          emoji: true
         }
-      ]
-    };
-
-    const slackResponse = await fetch(slackWebhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
       },
-      body: JSON.stringify(slackPayload),
-    });
+      {
+        type: 'section',
+        fields: [
+          {
+            type: 'mrkdwn',
+            text: `*Repository:*\n<https://github.com/${owner}/${repo}|${owner}/${repo}>`
+          },
+          {
+            type: 'mrkdwn',
+            text: `*Branch:*\n${workflowRun.head_branch}`
+          },
+          {
+            type: 'mrkdwn',
+            text: `*Commit:*\n<${workflowRun.head_commit?.url || '#'}|${workflowRun.head_sha.substring(0, 7)}>`
+          },
+          {
+            type: 'mrkdwn',
+            text: `*Failed Jobs:*\n${failedJobs.map(j => j.name).join(', ')}`
+          }
+        ]
+      },
+      {
+        type: 'divider'
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: summary
+        }
+      },
+      {
+        type: 'divider'
+      },
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: 'View Workflow Run',
+              emoji: true
+            },
+            url: workflowRun.html_url
+          }
+        ]
+      }
+    ];
 
-    if (!slackResponse.ok) {
-      throw new Error(`Slack webhook failed: ${slackResponse.status} ${slackResponse.statusText}`);
+    // Send notification based on mode
+    if (notificationMode === 'dm') {
+      core.info('Notification mode: DM to committer');
+
+      let slackUser = null;
+      if (committerEmail) {
+        slackUser = await lookupSlackUserByEmail(slackBotToken, committerEmail);
+      }
+
+      if (slackUser) {
+        core.info(`Found Slack user: ${slackUser.name} (${slackUser.id})`);
+        await sendSlackDM(slackBotToken, slackUser.id, blocks);
+        core.setOutput('notified_user', slackUser.id);
+        core.info(`DM sent to ${slackUser.name}`);
+      } else {
+        core.warning(`Could not find Slack user for email: ${committerEmail}`);
+
+        if (fallbackChannel) {
+          core.info(`Falling back to channel: ${fallbackChannel}`);
+          await sendSlackChannel(slackBotToken, fallbackChannel, blocks);
+          core.info('Message sent to fallback channel');
+        } else {
+          core.setFailed('Could not find Slack user and no fallback channel configured');
+          return;
+        }
+      }
+    } else {
+      // Channel mode
+      core.info('Notification mode: Channel');
+
+      if (slackWebhookUrl) {
+        await sendSlackWebhook(slackWebhookUrl, blocks);
+      } else if (slackBotToken && fallbackChannel) {
+        await sendSlackChannel(slackBotToken, fallbackChannel, blocks);
+      }
+
+      core.info('Summary posted to Slack channel');
     }
-
-    core.info('Summary posted to Slack successfully');
 
   } catch (error) {
     core.setFailed(`Action failed: ${error.message}`);
