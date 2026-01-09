@@ -23,7 +23,7 @@ Choose the AI provider that fits your needs:
 |----------|-------|------|-------|
 | `anthropic` | Claude Sonnet | ~$0.003-0.01/analysis | Best quality (default) |
 | `groq` | Llama 3.3 70B | **FREE** | Fast inference, generous free tier |
-| `gemini` | Gemini 1.5 Flash | **FREE** | 15 req/min free tier |
+| `gemini` | Gemini 2.0 Flash | **FREE** | 15 req/min free tier |
 
 ## Notification Modes
 
@@ -213,7 +213,7 @@ jobs:
 | `run_id` | Workflow run ID to analyze | No | Current run |
 | `max_log_lines` | Max log lines to analyze | No | `500` |
 
-*Default models: anthropic=`claude-sonnet-4-20250514`, groq=`llama-3.3-70b-versatile`, gemini=`gemini-1.5-flash`
+*Default models: anthropic=`claude-sonnet-4-20250514`, groq=`llama-3.3-70b-versatile`, gemini=`gemini-2.0-flash`
 
 **Either `slack_webhook_url` or `slack_bot_token` is required depending on mode.
 

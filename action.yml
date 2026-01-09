@@ -46,7 +46,7 @@ inputs:
     required: false
     default: '500'
   model:
-    description: 'Model to use. Defaults: anthropic=claude-sonnet-4-20250514, groq=llama-3.3-70b-versatile, gemini=gemini-1.5-flash'
+    description: 'Model to use. Defaults: anthropic=claude-sonnet-4-20250514, groq=llama-3.3-70b-versatile, gemini=gemini-2.0-flash'
     required: false
   include_log_snippet:
     description: 'Include relevant log snippet in Slack message'

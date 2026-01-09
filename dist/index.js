@@ -47268,7 +47268,7 @@ const { GoogleGenerativeAI } = __nccwpck_require__(7656);
 const DEFAULT_MODELS = {
   anthropic: 'claude-sonnet-4-20250514',
   groq: 'llama-3.3-70b-versatile',
-  gemini: 'gemini-1.5-flash',
+  gemini: 'gemini-2.0-flash',
 };
 
 // Error keywords to search for in logs
